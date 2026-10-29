@@ -1,0 +1,46 @@
+{
+  "name": "paperclip-plugin-model-router",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Paperclip plugin that picks the model and reasoning effort for each agent run from the task, clamped to per-agent limits.",
+  "license": "MIT",
+  "author": "Piotr Bomba",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BTL00/paperclip-plugin-model-router.git"
+  },
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "model-routing",
+    "llm",
+    "typesafe"
+  ],
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "^2026.1023.0"
+  },
+  "devDependencies": {
+    "@paperclipai/shared": "^2026.1023.0",
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
