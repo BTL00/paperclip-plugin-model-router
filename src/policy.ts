@@ -157,11 +157,18 @@ export function effortRank(effort: unknown): number | null {
   return index === -1 ? null : index
 }
 
-/** Where a model id sits on the ladder, or null when it is not on it. */
+/**
+ * Where a model id sits on the ladder, or null when it is not on it. An exact
+ * match wins; otherwise a ladder entry contained in the id counts, so the
+ * alias `sonnet` places `claude-sonnet-5-5`, which agents are often set to.
+ */
 export function rankOf(model: string, ladder: Ladder): number | null {
   if (!model) return null
-  const index = TIER_ORDER.findIndex((tier) => ladder[tier] === model)
-  return index === -1 ? null : index
+  const exact = TIER_ORDER.findIndex((tier) => ladder[tier] === model)
+  if (exact !== -1) return exact
+  const lowered = model.toLowerCase()
+  const partial = TIER_ORDER.findIndex((tier) => ladder[tier] && lowered.includes(ladder[tier].toLowerCase()))
+  return partial === -1 ? null : partial
 }
 
 export interface Bounds {
@@ -281,7 +288,8 @@ export function route(
     : TIER_ORDER.indexOf(config.assumeTierWhenUnset)
 
   let model: string | null = null
-  if (wantedModel && wantedModel !== current.model && (forced || allowed(wantedTierIndex, currentTier, decision.confidence, config))) {
+  const sameTier = wantedModel === current.model || wantedTierIndex === currentTier
+  if (wantedModel && !sameTier && (forced || allowed(wantedTierIndex, currentTier, decision.confidence, config))) {
     model = wantedModel
   } else if (currentTier !== null && clampIndex(currentTier, minTier, maxTier) !== currentTier) {
     model = ladder[TIER_ORDER[clampIndex(currentTier, minTier, maxTier)] as Tier] || null

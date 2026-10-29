@@ -38,15 +38,11 @@ const manifest: PaperclipPluginManifestV1 = {
     type: 'object',
     properties: {
       typesafeApiKey: {
-        type: 'object',
-        title: 'TypeSafe API key (secret reference)',
+        type: 'string',
+        format: 'secret-ref',
+        title: 'TypeSafe API key',
         description:
-          'A Paperclip secret holding a TypeSafe key, as { "type": "secret_ref", "secretId": "..." }. Without it a keyword heuristic is used, which may only route up.',
-        properties: {
-          type: { type: 'string', const: 'secret_ref' },
-          secretId: { type: 'string' },
-          version: {},
-        },
+          'A Paperclip secret holding a TypeSafe key. Without it a keyword heuristic is used, which may only route up.',
       },
       ladders: {
         type: 'object',

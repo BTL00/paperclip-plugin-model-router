@@ -121,8 +121,15 @@ describe('routing', () => {
     expect(run(decision({ tier: 'fast', confidence: 0.7 }), on('')).model).toBe('haiku')
   })
 
+  test('a full id is placed by the alias it contains, and its own tier is kept as written', () => {
+    const full = on('claude-sonnet-5-5', 'medium')
+    expect(run(decision({ tier: 'fast', confidence: 0.4 }), full).model).toBeNull()
+    expect(run(decision({ risky: 0.9 }), full).model).toBe('opus')
+    expect(run(decision({ tier: 'balanced', risky: 0.9 }), full, { ...NO_BOUNDS, maxTier: 'balanced' }).model).toBeNull()
+  })
+
   test('a model that is not on the ladder is treated as an upgrade, not guessed at', () => {
-    expect(run(decision({ tier: 'fast', confidence: 0.4 }), on('claude-sonnet-5')).model).toBe('haiku')
+    expect(run(decision({ tier: 'fast', confidence: 0.4 }), on('gpt-unknown')).model).toBe('haiku')
   })
 })
 
