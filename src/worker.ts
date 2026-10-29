@@ -120,7 +120,9 @@ async function routeIssue(ctx: PluginContext, companyId: string, issueId: string
   const ladder = adapterType ? config.ladders[adapterType] ?? null : null
 
   const hash = fingerprint(issue, bounds, ladder)
-  if (previous?.hash === hash) return
+  const adopted = isAdopted(issue, config.adoptLabel)
+  // An adopted issue is held until released, so it is handled whatever the hash says.
+  if (previous?.hash === hash && !adopted) return
 
   const overrides: IssueAssigneeAdapterOverrides = issue.assigneeAdapterOverrides ?? {}
   const adapterConfig = record(overrides.adapterConfig)
@@ -188,6 +190,39 @@ async function routeIssue(ctx: PluginContext, companyId: string, issueId: string
       .map(([key, value]) => `\`${key}\` ${value}`)
       .join(', ')
     await ctx.issues.createComment(issueId, `Model router: ${target}.\n\n${summary ?? ''}`, companyId)
+  }
+
+  if (adopted) await release(ctx, issue, config.adoptLabel, hash)
+}
+
+function isAdopted(issue: Issue, label: string): boolean {
+  if (!label || issue.status !== 'backlog' || !issue.assigneeAgentId) return false
+  return (issue.labels ?? []).some((l) => l.name.toLowerCase() === label.toLowerCase())
+}
+
+/**
+ * Hands an adopted issue back once its override is written: drops the label,
+ * moves it to `todo` and wakes the assignee. Paperclip does not wake a
+ * backlog issue, and a plugin's status change does not queue a run, so the
+ * wake is explicit. Runs whether or not routing changed anything, so the
+ * label can never strand an issue.
+ */
+async function release(ctx: PluginContext, issue: Issue, label: string, hash: string): Promise<void> {
+  const labelIds = (issue.labels ?? []).filter((l) => l.name.toLowerCase() !== label.toLowerCase()).map((l) => l.id)
+  await ctx.issues.update(issue.id, { status: 'todo', labelIds }, issue.companyId)
+  try {
+    await ctx.issues.requestWakeup(issue.id, issue.companyId, {
+      reason: 'model_router_routed',
+      contextSource: 'model-router',
+      idempotencyKey: `model-router:${issue.id}:${hash}`,
+    })
+  } catch (error) {
+    // Budget stops and unresolved blockers refuse the wake; the issue is in
+    // `todo` either way, so Paperclip picks it up when that clears.
+    ctx.logger.warn('model-router could not wake the adopted issue', {
+      issueId: issue.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 

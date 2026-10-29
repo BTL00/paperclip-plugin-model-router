@@ -64,11 +64,21 @@ The router follows four rules when it writes:
 - **`ladders`:** `claude_local` defaults to the `haiku` / `sonnet` / `opus` aliases. Other adapters are skipped until you configure their ladder.
 - **`assumeTierWhenUnset`:** the tier assumed for an agent with no model set, so a move below it counts as a downgrade.
 
-## Known limitation: the race
+## The race, and adopt mode
 
-Paperclip has no synchronous pre-run hook for choosing a model. `issue.created` and the assignment wake-up are both fire-and-forget, so on a freshly created and assigned issue the first run can start before the override lands. Later runs on the issue (follow-ups, retries) always get it.
+Paperclip has no synchronous pre-run hook for choosing a model. `issue.created` and the assignment wake-up are both fire-and-forget, so on a freshly created and assigned issue the first run starts before the override lands. Measured on a live instance: 5 of 5 runs started 0.15–0.73 s after creation, before a ~0.25 s decision arrived. Later runs on the issue (follow-ups, retries) do get it.
 
-The plugin measures this. Each issue's state records whether the decision landed `before-run` or `after-run`, and the instance state key `race-stats` keeps the totals.
+**Adopt mode** avoids the race. To use it:
+
+1. Create the issue in `backlog`, assigned to the agent, with the label `auto-route` (configurable as `adoptLabel`).
+2. Paperclip doesn't wake backlog issues, so the router decides first.
+3. It writes the override, removes the label, moves the issue to `todo` and wakes the agent itself.
+
+If routing fails, the issue is released all the same.
+
+The plugin measures the race. Each issue's state records whether the decision landed `before-run` or `after-run`, and the instance state key `race-stats` keeps the totals.
+
+A synchronous pre-run plugin hook in Paperclip itself is the proper fix and is being proposed upstream.
 
 The AI-connection router hook was examined as an alternative. It can't pick a model: it chooses between pool members that are distinct accounts, and the choice is pinned per task.
 

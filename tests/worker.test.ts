@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { beforeEach, describe, expect, test } from 'vitest'
-import { pluginManifestV1Schema, type Agent, type Issue } from '@paperclipai/shared'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { pluginManifestV1Schema, type Agent, type Issue, type IssueLabel } from '@paperclipai/shared'
 import { createTestHarness, type TestHarness } from '@paperclipai/plugin-sdk/testing'
 import manifest from '../src/manifest.js'
 import plugin, { type IssueRouting } from '../src/worker.js'
@@ -159,6 +159,61 @@ describe('worker', () => {
     await emitIssue('issue.created', id)
     expect(await overridesOf(id)).toBeNull()
     expect(stateOf(id)?.written).toEqual({})
+  })
+
+  describe('adopt mode', () => {
+    const label = (name: string) =>
+      ({ id: randomUUID(), companyId, name, color: '#000000', createdAt: new Date(), updatedAt: new Date() }) as IssueLabel
+    const adoptLabel = label('auto-route')
+    const other = label('video')
+
+    test('an adopted backlog issue is routed first, then released to todo and woken', async () => {
+      await setup(routed, [issue({ id, ...DEEP_TASK, status: 'backlog', labels: [adoptLabel, other] })])
+      const order: string[] = []
+      const update = harness.ctx.issues.update.bind(harness.ctx.issues)
+      vi.spyOn(harness.ctx.issues, 'update').mockImplementation(async (issueId, patch, cid) => {
+        order.push('status' in patch ? `status:${patch.status}` : 'override')
+        return update(issueId, patch, cid)
+      })
+      const wake = vi.spyOn(harness.ctx.issues, 'requestWakeup').mockImplementation(async () => {
+        order.push('wake')
+        return { queued: true, runId: 'r1' } as Awaited<ReturnType<typeof harness.ctx.issues.requestWakeup>>
+      })
+
+      await emitIssue('issue.created', id)
+
+      expect(order).toEqual(['override', 'status:todo', 'wake'])
+      const after = await harness.ctx.issues.get(id, companyId)
+      expect(after?.status).toBe('todo')
+      expect((after as Issue & { labelIds?: string[] }).labelIds).toEqual([other.id])
+      expect(after?.assigneeAdapterOverrides).toEqual({ adapterConfig: { model: 'opus', effort: 'high' } })
+      expect(wake).toHaveBeenCalledTimes(1)
+    })
+
+    test('an adopted issue is released even when its agent is not routed', async () => {
+      await setup({}, [issue({ id, ...DEEP_TASK, status: 'backlog', labels: [adoptLabel] })])
+      const wake = vi.spyOn(harness.ctx.issues, 'requestWakeup')
+      await emitIssue('issue.created', id)
+      expect((await harness.ctx.issues.get(id, companyId))?.status).toBe('todo')
+      expect(await overridesOf(id)).toBeNull()
+      expect(wake).toHaveBeenCalledTimes(1)
+    })
+
+    test('a refused wake still leaves the issue released', async () => {
+      await setup(routed, [issue({ id, ...DEEP_TASK, status: 'backlog', labels: [adoptLabel] })])
+      vi.spyOn(harness.ctx.issues, 'requestWakeup').mockRejectedValue(new Error('budget hard stop'))
+      await emitIssue('issue.created', id)
+      expect((await harness.ctx.issues.get(id, companyId))?.status).toBe('todo')
+      expect(harness.logs.some((l) => l.message.includes('could not wake'))).toBe(true)
+    })
+
+    test('a backlog issue without the label is planning, not a request: it is not released', async () => {
+      await setup(routed, [issue({ id, ...DEEP_TASK, status: 'backlog', labels: [other] })])
+      const wake = vi.spyOn(harness.ctx.issues, 'requestWakeup')
+      await emitIssue('issue.created', id)
+      expect((await harness.ctx.issues.get(id, companyId))?.status).toBe('backlog')
+      expect(wake).not.toHaveBeenCalled()
+    })
   })
 
   test('closed issues are ignored', async () => {

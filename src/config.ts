@@ -28,7 +28,15 @@ export interface RouterConfig {
   excludedAgentIds: Set<string>
   /** Post a comment on the issue when the router changes something. */
   comment: boolean
+  /**
+   * Label that marks a backlog issue for adoption: the router decides first,
+   * then moves it to `todo` and wakes the agent itself, so the run cannot
+   * start before the decision. Empty disables adopt mode.
+   */
+  adoptLabel: string
 }
+
+export const DEFAULT_ADOPT_LABEL = 'auto-route'
 
 /**
  * Claude Code accepts family aliases for `--model`, so these stay valid as
@@ -110,5 +118,6 @@ export function parseConfig(raw: Record<string, unknown>): RouterConfig {
     agents,
     excludedAgentIds: new Set(excluded.map(string).filter(Boolean)),
     comment: raw.comment !== false,
+    adoptLabel: typeof raw.adoptLabel === 'string' ? raw.adoptLabel.trim() : DEFAULT_ADOPT_LABEL,
   }
 }

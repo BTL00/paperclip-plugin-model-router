@@ -24,6 +24,7 @@ const manifest: PaperclipPluginManifestV1 = {
     'events.subscribe',
     'issues.read',
     'issues.update',
+    'issues.wakeup',
     'issue.comments.create',
     'agents.read',
     'plugin.state.read',
@@ -81,6 +82,13 @@ const manifest: PaperclipPluginManifestV1 = {
       minDowngradeConfidence: { type: 'number', minimum: 0, maximum: 1, default: 0.6 },
       riskyThreshold: { type: 'number', minimum: 0, maximum: 1, default: 0.7 },
       assumeTierWhenUnset: { ...tierEnum, default: 'balanced' },
+      adoptLabel: {
+        type: 'string',
+        title: 'Adopt label',
+        description:
+          'A backlog issue with this label is routed first, then moved to todo and woken by the router, so the run always starts with the decision in place. Empty disables adopt mode.',
+        default: 'auto-route',
+      },
       comment: {
         type: 'boolean',
         title: 'Comment on routed issues',
