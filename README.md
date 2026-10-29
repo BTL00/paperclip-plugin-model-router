@@ -66,7 +66,13 @@ The router follows four rules when it writes:
 
 ## The race, and adopt mode
 
-Paperclip has no synchronous pre-run hook for choosing a model. `issue.created` and the assignment wake-up are both fire-and-forget, so on a freshly created and assigned issue the first run starts before the override lands. Measured on a live instance: 5 of 5 runs started 0.15–0.73 s after creation, before a ~0.25 s decision arrived. Later runs on the issue (follow-ups, retries) do get it.
+Paperclip has no synchronous pre-run hook for choosing a model. `issue.created` and the assignment wake-up are both fire-and-forget, so on a freshly created and assigned issue the first run may read its config before the override lands. Measured on a live instance, 2 of 5 runs went without it:
+
+- Runs started 0.15–0.73 s after creation and read their config a few hundred ms later.
+- A decision took ~0.25 s.
+- Whether the override made it was down to timing.
+
+Later runs on the issue (follow-ups, retries) do get it.
 
 **Adopt mode** avoids the race. To use it:
 
