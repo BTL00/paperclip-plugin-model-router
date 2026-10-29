@@ -321,7 +321,8 @@ export function route(
     const kept = `${current.model || 'default'}${current.effort === undefined ? '' : `/${String(current.effort)}`}`
     return { model: null, effort: null, reason: `kept ${kept}, wanted ${why}${cap}` }
   }
-  return { model, effort, reason: `${why}${cap}` }
+  const keptModel = model ? '' : `; model kept at ${current.model || 'default'}`
+  return { model, effort, reason: `${why}${cap}${keptModel}` }
 }
 
 /** The adapter config keys a routing writes. Null when there is nothing to write. */
