@@ -1,4 +1,8 @@
-dist
-node_modules
-.paperclip-sdk
+node_modules/
+dist/
+*.tgz
+.env
+.env.*
 CLAUDE.local.md
+.claude/settings.local.json
+.paperclip-sdk
