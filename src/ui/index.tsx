@@ -34,13 +34,21 @@ export function SavingsWidget({ context }: PluginWidgetProps) {
       </div>
       <p style={{ margin: 0, fontSize: 12, opacity: 0.75 }}>
         Down {decisions.down} · up {decisions.up} · effort only {decisions.effort} · kept {decisions.kept}
-        {decisions.changed > 0 ? ` · other ${decisions.changed}` : ''}. Priced issues {savings.pricedIssues}
-        {savings.unpricedIssues > 0 ? `, ${savings.unpricedIssues} without a price` : ''}.
+        {decisions.changed > 0 ? ` · other ${decisions.changed}` : ''}
       </p>
-      <p style={{ margin: 0, fontSize: 12, opacity: 0.75 }}>
-        Estimate: each routed issue's tokens priced at its agent's default model, using this instance's own cost
-        history, minus what it cost. A change of effort alone counts as no saving.
-      </p>
+      <details style={{ fontSize: 12, opacity: 0.75 }}>
+        <summary style={{ cursor: 'pointer' }}>How the saving is estimated</summary>
+        <p style={{ margin: '4px 0 0' }}>
+          Each routed issue's tokens are priced at its agent's default model, using this instance's own cost history,
+          minus what the issue cost. A change of effort alone counts as no saving.
+        </p>
+        <p style={{ margin: '4px 0 0' }}>
+          Issues priced: {savings.pricedIssues}
+          {savings.unpricedIssues > 0
+            ? ` · left out: ${savings.unpricedIssues} (no price for the default model, or a run billed at $0)`
+            : ''}
+        </p>
+      </details>
     </section>
   )
 }
