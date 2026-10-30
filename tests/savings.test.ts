@@ -35,6 +35,15 @@ describe('savings', () => {
     expect(rateFor('', rates)).toBeNull()
   })
 
+  test('a full model id finds a price recorded under its alias, but not under another version', () => {
+    const rates = new Map([
+      ['sonnet', 0.03],
+      ['claude-opus-5', 0.05],
+    ])
+    expect(rateFor('claude-sonnet-5-5', rates)).toBe(0.03)
+    expect(rateFor('claude-opus-5-5', rates)).toBeNull()
+  })
+
   test('a downgraded issue saves the difference to its baseline model', () => {
     const rates = new Map([
       ['claude-haiku-5-5', 0.01],
@@ -63,6 +72,28 @@ describe('savings', () => {
       rates,
     )
     expect(result).toEqual({ actualCents: 0, baselineCents: 0, savedCents: 0, pricedIssues: 0, unpricedIssues: 2 })
+  })
+
+  test('runs on the baseline model save nothing, whatever the averaged rate', () => {
+    const rates = new Map([['sonnet', 0.03]])
+    const result = estimateSavings([routed('i1', 'claude-sonnet-5-5', usage('sonnet', 7, 1000))], rates)
+    expect(result).toEqual({ actualCents: 7, baselineCents: 7, savedCents: 0, pricedIssues: 1, unpricedIssues: 0 })
+  })
+
+  test('a run that used no tokens does not leave the issue out', () => {
+    const rates = new Map([
+      ['claude-haiku-5-5', 0.01],
+      ['claude-sonnet-5-5', 0.03],
+    ])
+    const result = estimateSavings(
+      [
+        routed('i1', 'claude-sonnet-5-5', usage('claude-haiku-5-5', 10, 1000)),
+        routed('i1', 'claude-sonnet-5-5', usage('', 0, 0)),
+        routed('empty', 'claude-sonnet-5-5', usage('', 0, 0)),
+      ],
+      rates,
+    )
+    expect(result).toEqual({ actualCents: 10, baselineCents: 30, savedCents: 20, pricedIssues: 1, unpricedIssues: 0 })
   })
 
   test('several models on one issue are summed against one baseline', () => {

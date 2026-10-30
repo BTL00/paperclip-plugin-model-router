@@ -63,16 +63,21 @@ export function modelRates(usages: readonly Usage[]): Map<string, number> {
 }
 
 /**
- * The rate for a model id or alias. Agents are often configured with an
- * alias (`sonnet`) while cost events carry the full id (`claude-sonnet-5-5`),
- * so an alias contained in exactly one priced id also matches.
+ * The rate for a model id or alias. The agent's model and the cost events
+ * may name the same model differently: `sonnet` on one side and
+ * `claude-sonnet-5-5` on the other, either way round. So an alias contained
+ * in exactly one priced id matches, and so does a priced alias (a name with
+ * no version digits) contained in the model id.
  */
 export function rateFor(model: string, rates: ReadonlyMap<string, number>): number | null {
   if (!model) return null
   const exact = rates.get(model)
   if (exact !== undefined) return exact
   const lowered = model.toLowerCase()
-  const matches = [...rates.keys()].filter((id) => id.toLowerCase().includes(lowered))
+  const matches = [...rates.keys()].filter((id) => {
+    const priced = id.toLowerCase()
+    return priced.includes(lowered) || (!/\d/.test(priced) && lowered.includes(priced))
+  })
   return matches.length === 1 ? (rates.get(matches[0] as string) ?? null) : null
 }
 
@@ -81,7 +86,10 @@ export function estimateSavings(routed: readonly RoutedUsage[], rates: ReadonlyM
   for (const usage of routed) byIssue.set(usage.issueId, [...(byIssue.get(usage.issueId) ?? []), usage])
 
   const result: Savings = { actualCents: 0, baselineCents: 0, savedCents: 0, pricedIssues: 0, unpricedIssues: 0 }
-  for (const usages of byIssue.values()) {
+  for (const all of byIssue.values()) {
+    // A run that used no tokens (woken and finished at once) has nothing to price.
+    const usages = all.filter((usage) => weightedTokens(usage) > 0)
+    if (usages.length === 0) continue
     const baselineRate = rateFor(usages[0]?.baselineModel ?? '', rates)
     // A run billed at nothing (a subscription, or not priced yet) would
     // count its whole baseline as saved.
@@ -90,7 +98,13 @@ export function estimateSavings(routed: readonly RoutedUsage[], rates: ReadonlyM
       continue
     }
     const actual = usages.reduce((sum, usage) => sum + usage.costCents, 0)
-    const baseline = usages.reduce((sum, usage) => sum + weightedTokens(usage) * baselineRate, 0)
+    // Runs already on the baseline model cost what they cost; repricing them
+    // at the averaged rate would invent a small saving or loss.
+    const baseline = usages.reduce(
+      (sum, usage) =>
+        sum + (rateFor(usage.model, rates) === baselineRate ? usage.costCents : weightedTokens(usage) * baselineRate),
+      0,
+    )
     result.actualCents += actual
     result.baselineCents += baseline
     result.pricedIssues += 1
