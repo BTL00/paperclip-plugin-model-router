@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { pluginManifestV1Schema, type Agent, type Issue, type IssueLabel } from '@paperclipai/shared'
 import { createTestHarness, type TestHarness } from '@paperclipai/plugin-sdk/testing'
 import manifest from '../src/manifest.js'
-import plugin, { type IssueRouting } from '../src/worker.js'
+import plugin, { direction, type DashboardData, type IssueRouting } from '../src/worker.js'
 
 const companyId = randomUUID()
 const agentId = randomUUID()
@@ -102,6 +102,30 @@ describe('worker', () => {
     expect(comments).toHaveLength(1)
     expect(comments[0]?.body).toContain('`model` opus')
     expect(stateOf(id)?.written).toEqual({ model: 'opus', effort: 'high' })
+  })
+
+  test('each decision is recorded in the plugin table for the dashboard', async () => {
+    await setup(routed, [issue({ id, ...DEEP_TASK })])
+    await emitIssue('issue.created', id)
+    const insert = harness.dbExecutes.find((e) => e.sql.includes('routing_decisions'))
+    expect(insert?.params?.slice(1, 4)).toEqual([companyId, id, agentId])
+    expect(insert?.params?.slice(5, 9)).toEqual(['sonnet', 'opus', 'high', 'up'])
+  })
+
+  test('the dashboard data handler answers even before any cost is recorded', async () => {
+    await setup(routed, [issue({ id, ...DEEP_TASK })])
+    const data = await harness.getData<DashboardData>('dashboard', { companyId })
+    expect(data.savings).toEqual({ actualCents: 0, baselineCents: 0, savedCents: 0, pricedIssues: 0, unpricedIssues: 0 })
+    expect(data.decisions).toEqual({ down: 0, up: 0, effort: 0, kept: 0, changed: 0 })
+  })
+
+  test('directions follow the ladder', () => {
+    const ladder = { fast: 'haiku', balanced: 'sonnet', deep: 'opus' }
+    expect(direction('claude-sonnet-5-5', 'haiku', null, ladder)).toBe('down')
+    expect(direction('sonnet', 'opus', 'high', ladder)).toBe('up')
+    expect(direction('sonnet', null, 'low', ladder)).toBe('effort')
+    expect(direction('sonnet', null, null, ladder)).toBe('kept')
+    expect(direction('', 'opus', null, ladder)).toBe('changed')
   })
 
   test('codex agents get their own effort key', async () => {

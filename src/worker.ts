@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { definePlugin, runWorker, type PluginContext, type PluginEvent } from '@paperclipai/plugin-sdk'
 import type { Issue, IssueAssigneeAdapterOverrides } from '@paperclipai/shared'
 import { classifyHeuristically, classifyWithJev, type Classification } from './classify.js'
@@ -7,12 +7,14 @@ import {
   ADAPTER_KEYS,
   describeDecision,
   isAdapterType,
+  rankOf,
   route,
   toOverrides,
   type AdapterType,
   type Bounds,
   type Ladder,
 } from './policy.js'
+import { estimateSavings, modelRates, type RoutedUsage, type Savings, type Usage } from './savings.js'
 
 /** What the router remembers about one issue. */
 export interface IssueRouting {
@@ -149,6 +151,19 @@ async function routeIssue(ctx: PluginContext, companyId: string, issueId: string
         Object.entries(toOverrides(adapterType, routing) ?? {}).filter(([key]) => !locked.has(key)),
       )
       summary = `${describeDecision(classification.decision, classification.ms)} · ${classification.classifier} · ${routing.reason}`
+      const routedModel = next[keys.model] ?? null
+      const routedEffort = next[keys.effort] ?? null
+      await recordDecision(ctx, {
+        companyId,
+        issueId,
+        agentId: agent.id,
+        baselineModel: current.model,
+        routedModel,
+        routedEffort,
+        direction: direction(current.model, routedModel, routedEffort, ladder),
+        classifier: classification.classifier,
+        summary,
+      })
       ctx.logger.info('model-router decision', {
         issueId,
         agentId,
@@ -193,6 +208,144 @@ async function routeIssue(ctx: PluginContext, companyId: string, issueId: string
   }
 
   if (adopted) await release(ctx, issue, config.adoptLabel, hash)
+}
+
+export type Direction = 'down' | 'up' | 'effort' | 'kept' | 'changed'
+
+/** Which way a decision moved the agent, for the dashboard counts. */
+export function direction(baseline: string, model: string | null, effort: string | null, ladder: Ladder): Direction {
+  if (!model) return effort ? 'effort' : 'kept'
+  const from = rankOf(baseline, ladder)
+  const to = rankOf(model, ladder)
+  if (from === null || to === null || from === to) return 'changed'
+  return to < from ? 'down' : 'up'
+}
+
+interface DecisionRecord {
+  companyId: string
+  issueId: string
+  agentId: string
+  baselineModel: string
+  routedModel: string | null
+  routedEffort: string | null
+  direction: Direction
+  classifier: string
+  summary: string
+}
+
+/**
+ * Keeps every decision in the plugin's own table, so the dashboard can join
+ * routed issues to their cost events. A failed write is logged and ignored:
+ * the record is for reporting, the routing itself already happened.
+ */
+async function recordDecision(ctx: PluginContext, decision: DecisionRecord): Promise<void> {
+  try {
+    await ctx.db.execute(
+      `INSERT INTO ${ctx.db.namespace}.routing_decisions
+         (id, company_id, issue_id, agent_id, decided_at, baseline_model, routed_model, routed_effort, direction, classifier, summary)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        randomUUID(),
+        decision.companyId,
+        decision.issueId,
+        decision.agentId,
+        new Date().toISOString(),
+        decision.baselineModel,
+        decision.routedModel,
+        decision.routedEffort,
+        decision.direction,
+        decision.classifier,
+        decision.summary,
+      ],
+    )
+  } catch (error) {
+    ctx.logger.warn('model-router could not record the decision', {
+      issueId: decision.issueId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+const REPORT_DAYS = 30
+// Prices are learned over a longer window, so a model used rarely in the
+// report window still has one.
+const PRICE_DAYS = 90
+
+export interface DashboardData {
+  days: number
+  decisions: Record<Direction, number>
+  savings: Savings
+  race: RaceStats
+}
+
+function count(value: unknown): number {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function toUsage(row: Record<string, unknown>): Usage {
+  return {
+    model: String(row.model ?? ''),
+    inputTokens: count(row.input_tokens),
+    cachedInputTokens: count(row.cached_input_tokens),
+    outputTokens: count(row.output_tokens),
+    costCents: count(row.cost_cents),
+  }
+}
+
+/** What the dashboard widget shows for one company. */
+async function dashboard(ctx: PluginContext, companyId: string): Promise<DashboardData> {
+  const ns = ctx.db.namespace
+  const since = new Date(Date.now() - REPORT_DAYS * 86_400_000).toISOString()
+  const priceSince = new Date(Date.now() - PRICE_DAYS * 86_400_000).toISOString()
+
+  const directionRows = await ctx.db.query(
+    `SELECT direction, count(*) AS n FROM ${ns}.routing_decisions
+      WHERE company_id = $1 AND decided_at >= $2 GROUP BY direction`,
+    [companyId, since],
+  )
+  const routedRows = await ctx.db.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (issue_id) issue_id, agent_id, decided_at, baseline_model
+         FROM ${ns}.routing_decisions
+        WHERE company_id = $1 AND decided_at >= $2
+        ORDER BY issue_id, decided_at DESC
+     )
+     SELECT l.issue_id, l.baseline_model, c.model,
+            sum(c.input_tokens) AS input_tokens, sum(c.cached_input_tokens) AS cached_input_tokens,
+            sum(c.output_tokens) AS output_tokens, sum(c.cost_cents) AS cost_cents
+       FROM latest l
+       JOIN public.cost_events c
+         ON c.issue_id = l.issue_id AND c.agent_id = l.agent_id AND c.company_id = $1 AND c.occurred_at >= l.decided_at
+      GROUP BY l.issue_id, l.baseline_model, c.model`,
+    [companyId, since],
+  )
+  const priceRows = await ctx.db.query(
+    `SELECT model, sum(input_tokens) AS input_tokens, sum(cached_input_tokens) AS cached_input_tokens,
+            sum(output_tokens) AS output_tokens, sum(cost_cents) AS cost_cents
+       FROM public.cost_events
+      WHERE company_id = $1 AND occurred_at >= $2 AND cost_cents > 0
+      GROUP BY model`,
+    [companyId, priceSince],
+  )
+
+  const decisions: Record<Direction, number> = { down: 0, up: 0, effort: 0, kept: 0, changed: 0 }
+  for (const row of directionRows) {
+    const key = String(row.direction) as Direction
+    if (key in decisions) decisions[key] = count(row.n)
+  }
+  const routed: RoutedUsage[] = routedRows.map((row) => ({
+    ...toUsage(row),
+    issueId: String(row.issue_id),
+    baselineModel: String(row.baseline_model ?? ''),
+  }))
+  const stats = record(await ctx.state.get({ scopeKind: 'instance', stateKey: RACE_KEY }))
+  return {
+    days: REPORT_DAYS,
+    decisions,
+    savings: estimateSavings(routed, modelRates(priceRows.map(toUsage))),
+    race: { beforeRun: count(stats.beforeRun), afterRun: count(stats.afterRun) },
+  }
 }
 
 function isAdopted(issue: Issue, label: string): boolean {
@@ -277,6 +430,11 @@ const plugin = definePlugin({
       const issueId = record(event.payload).issueId
       if (typeof issueId !== 'string') return
       await queue(issueId, () => noteRunStarted(ctx, event))
+    })
+    ctx.data.register('dashboard', async (params) => {
+      const companyId = typeof params.companyId === 'string' ? params.companyId : null
+      if (!companyId) throw new Error('companyId is required')
+      return dashboard(ctx, companyId)
     })
   },
 

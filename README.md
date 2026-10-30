@@ -2,7 +2,7 @@
 
 **Per-task model routing for [Paperclip](https://github.com/paperclipai/paperclip) agents.** Most agent runs don't need your biggest model. This plugin reads each task before the agent picks it up, decides how hard it is, and runs the agent with the cheapest model and reasoning effort that can do it well. Each agent can be given its own **min** and **max** model.
 
-> Status: early work in progress. The policy and worker are written and unit-tested; end-to-end testing on a live Paperclip instance is next.
+> Status: work in progress. It runs on a live Paperclip instance: routing, adopt mode and the savings dashboard are tested end to end. A synchronous pre-run hook is proposed upstream ([paperclipai/paperclip#18300](https://github.com/paperclipai/paperclip/issues/18300)).
 
 A typo fix doesn't need the deepest model, and a production incident shouldn't run on the cheapest one. The router reads an issue's title and description, asks a decision model three questions, and writes the result as a per-issue adapter override. Paperclip merges that override into the agent's config when it prepares the run.
 
@@ -39,6 +39,25 @@ The router follows four rules when it writes:
 - When the issue is reassigned, it removes the keys it wrote, so a model id never carries over to another agent.
 - When it changes something, it comments on the issue, e.g.: `Model router: model opus, effort high. tier deep (0.82) · effort 2.1 → high (0.74) · risky 0.04 · 280 ms · jev · deep (confidence 0.82)`
 - Agents are routed only when listed (opt-in). Excluded agents are never classified, so their task text is never sent anywhere.
+
+## Dashboard
+
+A dashboard widget shows the last 30 days:
+
+- **Estimated saved**
+- **Spent on routed issues**
+- **The number of decisions,** split into down, up, effort only and kept
+- **How often the decision landed before the first run**
+
+Every decision is stored in the plugin's own database table (`routing_decisions`). The widget joins it to Paperclip's `cost_events` (read-only).
+
+**How the saving is estimated.** Paperclip records tokens and cost per model, but no price list. So each model's price is learned from the instance's own cost history over the last 90 days. Anthropic prices cached input at a tenth of input and output at five times input, which leaves one price per model to learn. A routed issue's tokens are then priced at its agent's default model, and its actual cost is subtracted.
+
+What the estimate leaves out:
+
+- **Token differences between models.** The same task on another model wouldn't use exactly the same tokens.
+- **Effort-only changes.** A change of effort alone counts as no saving.
+- **Some issues entirely:** those whose default model has no price yet, and those with a run billed at nothing (a subscription, or not priced yet). These are counted separately.
 
 ## Configuration
 

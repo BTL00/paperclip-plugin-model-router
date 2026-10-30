@@ -23,10 +23,12 @@
   },
   "paperclipPlugin": {
     "manifest": "./dist/manifest.js",
-    "worker": "./dist/worker.js"
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
   },
   "files": [
     "dist",
+    "migrations",
     "README.md",
     "LICENSE"
   ],
@@ -39,7 +41,9 @@
   "devDependencies": {
     "@paperclipai/shared": "^2026.1023.0",
     "@types/node": "^26.6.6",
+    "@types/react": "^18.3.31",
     "esbuild": "^0.28.2",
+    "react": "^18.3.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

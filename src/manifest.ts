@@ -31,9 +31,29 @@ const manifest: PaperclipPluginManifestV1 = {
     'plugin.state.write',
     'secrets.read-ref',
     'http.outbound',
+    'database.namespace.migrate',
+    'database.namespace.read',
+    'database.namespace.write',
+    'ui.dashboardWidget.register',
   ],
   entrypoints: {
     worker: './dist/worker.js',
+    ui: './dist/ui',
+  },
+  database: {
+    namespaceSlug: 'model_router',
+    migrationsDir: 'migrations',
+    coreReadTables: ['cost_events'],
+  },
+  ui: {
+    slots: [
+      {
+        type: 'dashboardWidget',
+        id: 'model-router-savings',
+        displayName: 'Model router',
+        exportName: 'SavingsWidget',
+      },
+    ],
   },
   instanceConfigSchema: {
     type: 'object',
