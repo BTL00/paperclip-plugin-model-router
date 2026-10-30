@@ -58,8 +58,9 @@ const manifest: PaperclipPluginManifestV1 = {
   instanceConfigSchema: {
     type: 'object',
     properties: {
+      // No `type`: Paperclip's secret picker stores a `{ type: 'secret_ref' }`
+      // object here, which a `type: 'string'` schema would reject on save.
       typesafeApiKey: {
-        type: 'string',
         format: 'secret-ref',
         title: 'TypeSafe API key',
         description:
